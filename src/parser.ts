@@ -59,6 +59,7 @@ const ALIAS_STOPWORDS = new Set([
   "WHERE",
   "GROUP",
   "HAVING",
+  "WINDOW",
   "ORDER",
   "LIMIT",
   "OFFSET",
@@ -87,6 +88,10 @@ function identifierExpr(name: Identifier | ObjectName): IdentifierExpr {
 
 function rawExpr(sql: string): RawExpr {
   return { kind: "raw_expr", sql };
+}
+
+function formatIdentifier(identifier: Identifier): string {
+  return identifier.quoted ? `${identifier.quoted}${identifier.name}${identifier.quoted}` : identifier.name;
 }
 
 function binary(operator: string, left: Expr, right: Expr): Expr {
@@ -127,7 +132,30 @@ class Parser {
     return statements;
   }
 
+  parseSingleStatement(): Statement {
+    const statement = this.parseStatementBody();
+    if (!this.isStatementBoundary()) {
+      throw new SyntaxError(`Unexpected token ${this.peek().value}`);
+    }
+    if (this.isPunctuation(";")) {
+      this.index += 1;
+    }
+    if (!this.is("eof")) {
+      throw new SyntaxError(`Expected exactly one statement, found extra token ${this.peek().value}`);
+    }
+    return statement;
+  }
+
   private parseStatement(): Statement {
+    const start = this.peek().start;
+    const parsed = this.parseStatementBody();
+    if (this.isStatementBoundary()) {
+      return parsed;
+    }
+    return { kind: "raw_statement", sql: this.consumeStatementSql(start) };
+  }
+
+  private parseStatementBody(): Statement {
     if (this.matchKeyword("WITH") || this.matchKeyword("SELECT")) {
       return this.parseSelectStatement();
     }
@@ -198,15 +226,22 @@ class Parser {
     }
 
     let engine: Expr | undefined;
+    let partitionBy: Expr | undefined;
     let onCommit: string | undefined;
     let primaryKey: Expr | undefined;
     let orderBy: Expr | undefined;
+    let settings: Setting[] | undefined;
     let asSelect: SelectStatement | undefined;
 
     while (!this.isStatementBoundary()) {
       if (this.parseKeyword("ENGINE")) {
         this.expectOperator("=");
         engine = this.parseEngineExpression();
+        continue;
+      }
+      if (this.parseKeyword("PARTITION")) {
+        this.expectKeyword("BY");
+        partitionBy = this.parseExpr();
         continue;
       }
       if (this.parseKeyword("ON")) {
@@ -222,6 +257,10 @@ class Parser {
       if (this.parseKeyword("ORDER")) {
         this.expectKeyword("BY");
         orderBy = this.parseExpr();
+        continue;
+      }
+      if (this.parseKeyword("SETTINGS")) {
+        settings = this.parseCommaSeparated(() => this.parseSetting(), "AS", ";", "eof");
         continue;
       }
       if (this.parseKeyword("AS")) {
@@ -240,9 +279,11 @@ class Parser {
       columns,
       constraints: constraints.length ? constraints : undefined,
       engine,
+      partitionBy,
       onCommit,
       primaryKey,
       orderBy,
+      settings,
       asSelect,
     };
   }
@@ -530,13 +571,14 @@ class Parser {
     const withClause = this.parseWithClause();
     this.expectKeyword("SELECT");
     const distinct = this.parseKeyword("DISTINCT");
-    const projection = this.parseCommaSeparated(() => this.parseSelectItem(), "FROM", "PREWHERE", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "SETTINGS", "UNION", ";", "eof");
+    const projection = this.parseCommaSeparated(() => this.parseSelectItem(), "FROM", "PREWHERE", "WHERE", "GROUP", "HAVING", "WINDOW", "ORDER", "LIMIT", "OFFSET", "SETTINGS", "UNION", ";", "eof");
     let from: FromSource[] | undefined;
     let sample: SelectStatement["sample"] | undefined;
     let prewhere: Expr | undefined;
     let where: Expr | undefined;
     let groupBy: Expr[] | undefined;
     let having: Expr | undefined;
+    let windows: RawExpr[] | undefined;
     let orderBy: OrderByItem[] | undefined;
     let interpolate: InterpolateClause | undefined;
     let limit: LimitClause | undefined;
@@ -544,7 +586,7 @@ class Parser {
     let format: Identifier | undefined;
 
     if (this.parseKeyword("FROM")) {
-      from = this.parseCommaSeparated(() => this.parseFromSource(), "SAMPLE", "PREWHERE", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "SETTINGS", "FORMAT", "UNION", ";", "eof");
+      from = this.parseCommaSeparated(() => this.parseFromSource(), "SAMPLE", "PREWHERE", "WHERE", "GROUP", "HAVING", "WINDOW", "ORDER", "LIMIT", "OFFSET", "SETTINGS", "FORMAT", "UNION", ";", "eof");
     }
     if (this.parseKeyword("SAMPLE")) {
       const ratio = this.parseExpr();
@@ -562,7 +604,7 @@ class Parser {
       if (this.matchKeyword("GROUPING")) {
         groupBy = [rawExpr(this.consumeUntilClauseBoundary())];
       } else {
-        groupBy = this.parseCommaSeparated(() => this.parseExpr(), "HAVING", "ORDER", "LIMIT", "OFFSET", "SETTINGS", "FORMAT", "UNION", ";", "eof", "WITH");
+        groupBy = this.parseCommaSeparated(() => this.parseExpr(), "HAVING", "WINDOW", "ORDER", "LIMIT", "OFFSET", "SETTINGS", "FORMAT", "UNION", ";", "eof", "WITH");
       }
       if (this.parseKeyword("WITH")) {
         groupBy = [...(groupBy ?? []), rawExpr(`WITH ${this.consumeUntilClauseBoundary()}`)];
@@ -571,6 +613,9 @@ class Parser {
     if (this.parseKeyword("HAVING")) {
       having = this.parseExpr();
     }
+    if (this.parseKeyword("WINDOW")) {
+      windows = this.parseCommaSeparated(() => this.parseWindowDefinition(), "ORDER", "LIMIT", "OFFSET", "SETTINGS", "FORMAT", "UNION", ";", "eof");
+    }
     if (this.parseKeyword("ORDER")) {
       this.expectKeyword("BY");
       orderBy = this.parseCommaSeparated(() => this.parseOrderByItem(), "LIMIT", "OFFSET", "SETTINGS", "FORMAT", "UNION", ";", "eof", "INTERPOLATE");
@@ -578,14 +623,20 @@ class Parser {
         interpolate = this.parseInterpolateClause();
       }
     }
-    if (this.matchKeyword("LIMIT") || this.matchKeyword("OFFSET")) {
-      limit = this.parseLimitClause();
-    }
-    if (this.parseKeyword("SETTINGS")) {
-      settings = this.parseCommaSeparated(() => this.parseSetting(), "FORMAT", "UNION", ";", "eof");
-    }
-    if (this.parseKeyword("FORMAT")) {
-      format = this.parseIdentifier();
+    while (true) {
+      if (!limit && (this.matchKeyword("LIMIT") || this.matchKeyword("OFFSET"))) {
+        limit = this.parseLimitClause();
+        continue;
+      }
+      if (!settings && this.parseKeyword("SETTINGS")) {
+        settings = this.parseCommaSeparated(() => this.parseSetting(), "FORMAT", "UNION", ";", "eof");
+        continue;
+      }
+      if (!format && this.parseKeyword("FORMAT")) {
+        format = this.parseIdentifier();
+        continue;
+      }
+      break;
     }
 
     return {
@@ -599,6 +650,7 @@ class Parser {
       where,
       groupBy,
       having,
+      windows,
       orderBy,
       interpolate,
       limit,
@@ -745,6 +797,15 @@ class Parser {
     return { kind: "interpolate_item", column, expression };
   }
 
+  private parseWindowDefinition(): RawExpr {
+    const name = this.parseIdentifier();
+    this.expectKeyword("AS");
+    this.expectPunctuation("(");
+    const content = this.consumeBalancedContent();
+    this.expectPunctuation(")");
+    return rawExpr(`${formatIdentifier(name)} AS (${content})`);
+  }
+
   private parseLimitClause(): LimitClause {
     let offset: Expr | undefined;
     let limitExpr: Expr | undefined;
@@ -753,10 +814,14 @@ class Parser {
     if (this.parseKeyword("LIMIT")) {
       limitExpr = this.parseExpr();
       if (this.parseKeyword("BY")) {
-        by = { kind: "limit_by_clause", limit: limitExpr, by: this.parseCommaSeparated(() => this.parseExpr(), "OFFSET", "SETTINGS", "FORMAT", "UNION", ";", "eof") };
-        limitExpr = undefined;
+        by = {
+          kind: "limit_by_clause",
+          limit: limitExpr,
+          by: this.parseCommaSeparated(() => this.parseExpr(), "LIMIT", "OFFSET", "SETTINGS", "FORMAT", "UNION", ";", "eof"),
+        };
+        limitExpr = this.parseKeyword("LIMIT") ? this.parseExpr() : undefined;
       }
-      if (this.parseKeyword("WITH")) {
+      if (limitExpr && this.parseKeyword("WITH")) {
         this.expectKeyword("TIES");
         withTies = true;
       }
@@ -1205,6 +1270,13 @@ class Parser {
     return this.sql.slice(start, end).trim();
   }
 
+  private consumeStatementSql(start: number): string {
+    while (!this.is("eof") && !this.isPunctuation(";")) {
+      this.consume();
+    }
+    return this.sql.slice(start, this.peek().start).trim();
+  }
+
   private matchKeyword(keyword: string): boolean {
     return this.peek().type === "word" && normalizeTokenValue(this.peek()) === keyword;
   }
@@ -1344,7 +1416,7 @@ class Parser {
           depth = Math.max(0, depth - 1);
         }
       }
-      if (depth === 0 && token.type === "word" && ["HAVING", "ORDER", "LIMIT", "OFFSET", "SETTINGS", "FORMAT", "UNION", "WHERE"].includes(normalizeTokenValue(token))) {
+      if (depth === 0 && token.type === "word" && ["HAVING", "WINDOW", "ORDER", "LIMIT", "OFFSET", "SETTINGS", "FORMAT", "UNION", "WHERE"].includes(normalizeTokenValue(token))) {
         break;
       }
       this.consume();
@@ -1532,11 +1604,8 @@ export function parseSql(sql: string, options?: ParseOptions): Statement[] {
 }
 
 export function parseStatement(sql: string, options?: ParseOptions): Statement {
-  const statements = parseSql(sql, options);
-  if (statements.length !== 1) {
-    throw new SyntaxError(`Expected exactly one statement, found ${statements.length}`);
-  }
-  return statements[0]!;
+  const dialect = getDialect(options);
+  return new Parser(sql, dialect).parseSingleStatement();
 }
 
 export function parseExpr(sql: string, options?: ParseOptions): Expr {

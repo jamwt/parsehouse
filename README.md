@@ -454,6 +454,13 @@ console.log(toSql(stmt));
 - canonical serializer via `toSql()`
 - explicit Vitest coverage for upstream ClickHouse cases and a generated 150-query real-world corpus
 
+## Development
+
+- `npm run check` runs the TypeScript type-check
+- `npm test` runs the Vitest test suite
+- `npm run build` builds the package with `tsup`
+- `npm run bench` runs parse and generate benchmarks across five representative query sizes sampled from the test corpus
+
 ## Non-Goals
 
 - preserving original comments
