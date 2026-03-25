@@ -1,6 +1,6 @@
 # parsehouse
 
-[![CI](https://github.com/jamwt/parsehouse/actions/workflows/ci.yml/badge.svg)](https://github.com/jamwt/parsehouse/actions/workflows/ci.yml)
+[![CI](https://github.com/jamwt/parsehouse/workflows/CI/badge.svg)](https://github.com/jamwt/parsehouse/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/parsehouse.svg)](https://www.npmjs.com/package/parsehouse)
 [![npm downloads](https://img.shields.io/npm/dm/parsehouse.svg)](https://www.npmjs.com/package/parsehouse)
 
