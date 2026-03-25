@@ -131,6 +131,63 @@ import { toSql } from "parsehouse";
 const sql = toSql(stmt);
 ```
 
+## Subquery Example
+
+Subqueries can appear both in `FROM (...)` and inside expressions.
+
+### Subquery in `FROM`
+
+```ts
+import { ClickHouseDialect, parseStatement } from "parsehouse";
+
+const stmt = parseStatement(
+  `
+  SELECT user_id, cnt
+  FROM (
+    SELECT user_id, count() AS cnt
+    FROM events
+    GROUP BY user_id
+  ) AS aggregated
+  WHERE cnt > 10
+  ORDER BY cnt DESC
+  `,
+  { dialect: new ClickHouseDialect() },
+);
+
+if (stmt.kind === "select_statement") {
+  const source = stmt.from?.[0];
+
+  if (source?.kind === "subquery_source" && source.query.kind === "select_statement") {
+    console.log(source.query.projection);
+    console.log(source.query.groupBy);
+  }
+}
+```
+
+### Scalar subquery in an expression
+
+```ts
+import { ClickHouseDialect, parseStatement } from "parsehouse";
+
+const stmt = parseStatement(
+  `
+  SELECT
+    user_id,
+    (SELECT avg(score) FROM scores) AS average_score
+  FROM users
+  `,
+  { dialect: new ClickHouseDialect() },
+);
+
+if (stmt.kind === "select_statement") {
+  const firstItem = stmt.projection[1];
+
+  if (firstItem?.kind === "expression_select_item" && firstItem.expression.kind === "subquery_expr") {
+    console.log(firstItem.expression.query);
+  }
+}
+```
+
 ## AST Overview
 
 The AST is a set of discriminated unions keyed by `kind`.
