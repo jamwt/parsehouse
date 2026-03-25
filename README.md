@@ -1,5 +1,9 @@
 # parsehouse
 
+[![CI](https://github.com/jamwt/parsehouse/actions/workflows/ci.yml/badge.svg)](https://github.com/jamwt/parsehouse/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/parsehouse.svg)](https://www.npmjs.com/package/parsehouse)
+[![npm downloads](https://img.shields.io/npm/dm/parsehouse.svg)](https://www.npmjs.com/package/parsehouse)
+
 Pure TypeScript ClickHouse SQL parser with a typed AST, tree traversal helpers, and canonical SQL serialization.
 
 `parsehouse` is built for tools that need to parse SQL, inspect it, validate it, modify it, and turn it back into normalized SQL.
