@@ -27,7 +27,7 @@
     "serializer",
     "typescript"
   ],
-  "author": "",
+  "author": "Jamie Turner <me@jt.lol>",
   "license": "Apache-2.0",
   "devDependencies": {
     "@types/node": "^25.5.0",
