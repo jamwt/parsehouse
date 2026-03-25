@@ -229,6 +229,7 @@ export interface SelectStatement extends BaseNode {
   where?: Expr;
   groupBy?: Expr[];
   having?: Expr;
+  windows?: RawExpr[];
   orderBy?: OrderByItem[];
   interpolate?: InterpolateClause;
   limit?: LimitClause;
@@ -276,9 +277,11 @@ export interface CreateTableStatement extends BaseNode {
   columns: ColumnDefinition[];
   constraints?: RawExpr[];
   engine?: Expr | IdentifierExpr | FunctionCallExpr | RawExpr;
+  partitionBy?: Expr;
   onCommit?: string;
   primaryKey?: Expr;
   orderBy?: Expr;
+  settings?: Setting[];
   asSelect?: SelectStatement;
 }
 

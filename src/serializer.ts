@@ -266,6 +266,9 @@ export function serializeSelect(statement: SelectStatement): string {
   if (statement.having) {
     parts.push(`HAVING ${serializeExpr(statement.having)}`);
   }
+  if (statement.windows?.length) {
+    parts.push(`WINDOW ${statement.windows.map((window) => window.sql).join(", ")}`);
+  }
   if (statement.orderBy?.length) {
     parts.push(`ORDER BY ${statement.orderBy.map(serializeOrderByItem).join(", ")}`);
     if (statement.interpolate) {
@@ -276,7 +279,8 @@ export function serializeSelect(statement: SelectStatement): string {
     const limit = statement.limit;
     if (limit.by) {
       parts.push(`LIMIT ${serializeExpr(limit.by.limit)} BY ${limit.by.by.map(serializeExpr).join(", ")}`);
-    } else if (limit.limit) {
+    }
+    if (limit.limit) {
       parts.push(`LIMIT ${serializeExpr(limit.limit)}`);
     }
     if (limit.offset) {
@@ -309,11 +313,17 @@ function serializeCreateTable(statement: CreateTableStatement): string {
   if (statement.engine) {
     parts.push(`ENGINE = ${serializeEngine(statement.engine as Expr)}`);
   }
+  if (statement.partitionBy) {
+    parts.push(`PARTITION BY ${serializeExpr(statement.partitionBy)}`);
+  }
   if (statement.primaryKey) {
     parts.push(`PRIMARY KEY ${serializeExpr(statement.primaryKey)}`);
   }
   if (statement.orderBy) {
     parts.push(`ORDER BY ${serializeExpr(statement.orderBy)}`);
+  }
+  if (statement.settings?.length) {
+    parts.push(`SETTINGS ${serializeSettings(statement.settings)}`);
   }
   if (statement.asSelect) {
     parts.push(`AS ${serializeSelect(statement.asSelect)}`);

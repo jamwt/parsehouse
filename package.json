@@ -15,6 +15,7 @@
   },
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs --dts",
+    "bench": "vitest bench",
     "check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"

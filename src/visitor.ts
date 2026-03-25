@@ -26,6 +26,7 @@ export function visit(node: Statement | Expr, visitor: Visitor): void {
       node.where && visit(node.where, visitor);
       node.groupBy?.forEach((expression) => visit(expression, visitor));
       node.having && visit(node.having, visitor);
+      node.windows?.forEach((window) => visit(window, visitor));
       node.orderBy?.forEach((item) => visit(item.expression, visitor));
       node.limit?.limit && visit(node.limit.limit, visitor);
       node.limit?.offset && visit(node.limit.offset, visitor);
@@ -34,8 +35,10 @@ export function visit(node: Statement | Expr, visitor: Visitor): void {
       break;
     case "create_table_statement":
       node.engine && visit(node.engine, visitor);
+      node.partitionBy && visit(node.partitionBy, visitor);
       node.primaryKey && visit(node.primaryKey, visitor);
       node.orderBy && visit(node.orderBy, visitor);
+      node.settings?.forEach((setting) => setting.value && visit(setting.value, visitor));
       node.asSelect && visit(node.asSelect, visitor);
       break;
     case "create_view_statement":

@@ -4,11 +4,12 @@ import { ClickHouseDialect, parseSql, toSql } from "../src/index";
 
 const dialect = new ClickHouseDialect();
 
-function roundTrip(sql: string) {
+function roundTrip(sql: string, expectedStatements = 1) {
   const firstPass = parseSql(sql, { dialect });
-  expect(firstPass.length).toBeGreaterThan(0);
+  expect(firstPass).toHaveLength(expectedStatements);
   const canonical = firstPass.map((statement) => toSql(statement));
   const secondPass = parseSql(canonical.join("; "), { dialect });
+  expect(secondPass).toHaveLength(expectedStatements);
   expect(secondPass.map((statement) => toSql(statement))).toEqual(canonical);
 }
 
@@ -138,7 +139,7 @@ describe("clickhouse query examples", () => {
   });
 
   test("Q031 ROW_NUMBER", () => {
-    roundTrip("SELECT\n    user_id,\n    event_name,\n    timestamp,\n    ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY timestamp) AS row_num\nFROM sample_events;");
+    roundTrip("SELECT\n    user_id,\n    event_name,\n    timestamp,\n    ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY timestamp) AS row_num\nFROM sample_events;", 1);
   });
 
   test("Q032 RANK and DENSE_RANK", () => {
@@ -162,7 +163,7 @@ describe("clickhouse query examples", () => {
   });
 
   test("Q037 Named window definition", () => {
-    roundTrip("SELECT\n    user_id,\n    event_name,\n    event_value,\n    SUM(event_value) OVER w AS running_sum,\n    AVG(event_value) OVER w AS running_avg\nFROM sample_events\nWINDOW w AS (PARTITION BY user_id ORDER BY timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)\nORDER BY user_id, timestamp;");
+    roundTrip("SELECT\n    user_id,\n    event_name,\n    event_value,\n    SUM(event_value) OVER w AS running_sum,\n    AVG(event_value) OVER w AS running_avg\nFROM sample_events\nWINDOW w AS (PARTITION BY user_id ORDER BY timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)\nORDER BY user_id, timestamp;", 1);
   });
 
   test("Q038 percent_rank and first_value", () => {
@@ -322,7 +323,7 @@ describe("clickhouse query examples", () => {
   });
 
   test("Q077 MergeTree with ORDER BY and PARTITION BY", () => {
-    roundTrip("CREATE TABLE events_log (\n    timestamp DateTime,\n    user_id UInt64,\n    event_name LowCardinality(String),\n    event_value Float64,\n    properties Map(String, String)\n) ENGINE = MergeTree()\nPARTITION BY toYYYYMM(timestamp)\nORDER BY (user_id, timestamp)\nSETTINGS index_granularity = 8192;");
+    roundTrip("CREATE TABLE events_log (\n    timestamp DateTime,\n    user_id UInt64,\n    event_name LowCardinality(String),\n    event_value Float64,\n    properties Map(String, String)\n) ENGINE = MergeTree()\nPARTITION BY toYYYYMM(timestamp)\nORDER BY (user_id, timestamp)\nSETTINGS index_granularity = 8192;", 1);
   });
 
   test("Q078 ReplacingMergeTree", () => {
@@ -330,7 +331,7 @@ describe("clickhouse query examples", () => {
   });
 
   test("Q079 AggregatingMergeTree with materialized view", () => {
-    roundTrip("CREATE TABLE events_daily_agg (\n    day Date,\n    event_name LowCardinality(String),\n    count_state AggregateFunction(count),\n    uniq_users_state AggregateFunction(uniq, UInt64),\n    sum_value_state AggregateFunction(sum, Float64)\n) ENGINE = AggregatingMergeTree()\nORDER BY (day, event_name);\n\nCREATE MATERIALIZED VIEW events_daily_mv TO events_daily_agg AS\nSELECT\n    toDate(timestamp) AS day,\n    event_name,\n    countState() AS count_state,\n    uniqState(user_id) AS uniq_users_state,\n    sumState(event_value) AS sum_value_state\nFROM sample_events\nGROUP BY day, event_name;");
+    roundTrip("CREATE TABLE events_daily_agg (\n    day Date,\n    event_name LowCardinality(String),\n    count_state AggregateFunction(count),\n    uniq_users_state AggregateFunction(uniq, UInt64),\n    sum_value_state AggregateFunction(sum, Float64)\n) ENGINE = AggregatingMergeTree()\nORDER BY (day, event_name);\n\nCREATE MATERIALIZED VIEW events_daily_mv TO events_daily_agg AS\nSELECT\n    toDate(timestamp) AS day,\n    event_name,\n    countState() AS count_state,\n    uniqState(user_id) AS uniq_users_state,\n    sumState(event_value) AS sum_value_state\nFROM sample_events\nGROUP BY day, event_name;", 2);
   });
 
   test("Q080 CollapsingMergeTree", () => {
@@ -346,7 +347,7 @@ describe("clickhouse query examples", () => {
   });
 
   test("Q083 Projection", () => {
-    roundTrip("ALTER TABLE sample_events ADD PROJECTION events_by_user (\n    SELECT\n        user_id,\n        event_name,\n        count(),\n        sum(event_value)\n    GROUP BY user_id, event_name\n);\n\nALTER TABLE sample_events MATERIALIZE PROJECTION events_by_user;");
+    roundTrip("ALTER TABLE sample_events ADD PROJECTION events_by_user (\n    SELECT\n        user_id,\n        event_name,\n        count(),\n        sum(event_value)\n    GROUP BY user_id, event_name\n);\n\nALTER TABLE sample_events MATERIALIZE PROJECTION events_by_user;", 2);
   });
 
   test("Q084 CREATE TABLE with Nullable and DEFAULT", () => {
@@ -358,7 +359,7 @@ describe("clickhouse query examples", () => {
   });
 
   test("Q086 LIMIT BY", () => {
-    roundTrip("SELECT\n    user_id,\n    event_name,\n    timestamp,\n    event_value\nFROM sample_events\nORDER BY event_value DESC\nLIMIT 5 BY user_id\nLIMIT 100;");
+    roundTrip("SELECT\n    user_id,\n    event_name,\n    timestamp,\n    event_value\nFROM sample_events\nORDER BY event_value DESC\nLIMIT 5 BY user_id\nLIMIT 100;", 1);
   });
 
   test("Q087 SETTINGS clause", () => {
@@ -378,11 +379,11 @@ describe("clickhouse query examples", () => {
   });
 
   test("Q091 ALTER TABLE mutations", () => {
-    roundTrip("ALTER TABLE sample_events\nUPDATE event_name = 'page_impression'\nWHERE event_name = 'page_view' AND timestamp < '2024-01-01';\n\nALTER TABLE sample_events\nDELETE WHERE event_value < 0;");
+    roundTrip("ALTER TABLE sample_events\nUPDATE event_name = 'page_impression'\nWHERE event_name = 'page_view' AND timestamp < '2024-01-01';\n\nALTER TABLE sample_events\nDELETE WHERE event_value < 0;", 2);
   });
 
   test("Q092 OPTIMIZE TABLE", () => {
-    roundTrip("OPTIMIZE TABLE sample_events FINAL;\n\nOPTIMIZE TABLE sample_events PARTITION '202401' FINAL DEDUPLICATE BY user_id, event_name;");
+    roundTrip("OPTIMIZE TABLE sample_events FINAL;\n\nOPTIMIZE TABLE sample_events PARTITION '202401' FINAL DEDUPLICATE BY user_id, event_name;", 2);
   });
 
   test("Q093 CTE with multiple levels", () => {
@@ -410,7 +411,7 @@ describe("clickhouse query examples", () => {
   });
 
   test("Q099 -State / -Merge combinators", () => {
-    roundTrip("-- Insert aggregated states\nINSERT INTO events_daily_agg\nSELECT\n    toDate(timestamp) AS day,\n    event_name,\n    countState() AS count_state,\n    uniqState(user_id) AS uniq_users_state,\n    sumState(event_value) AS sum_value_state\nFROM sample_events\nGROUP BY day, event_name;\n\n-- Query merged states\nSELECT\n    day,\n    event_name,\n    countMerge(count_state) AS total_count,\n    uniqMerge(uniq_users_state) AS unique_users,\n    sumMerge(sum_value_state) AS total_value\nFROM events_daily_agg\nGROUP BY day, event_name;");
+    roundTrip("-- Insert aggregated states\nINSERT INTO events_daily_agg\nSELECT\n    toDate(timestamp) AS day,\n    event_name,\n    countState() AS count_state,\n    uniqState(user_id) AS uniq_users_state,\n    sumState(event_value) AS sum_value_state\nFROM sample_events\nGROUP BY day, event_name;\n\n-- Query merged states\nSELECT\n    day,\n    event_name,\n    countMerge(count_state) AS total_count,\n    uniqMerge(uniq_users_state) AS unique_users,\n    sumMerge(sum_value_state) AS total_value\nFROM events_daily_agg\nGROUP BY day, event_name;", 2);
   });
 
   test("Q100 Dictionary lookup with dictGet", () => {
@@ -494,7 +495,7 @@ describe("clickhouse query examples", () => {
   });
 
   test("Q120 SELECT with FORMAT Pretty and color settings", () => {
-    roundTrip("SELECT\n    database,\n    table,\n    formatReadableSize(total_bytes) AS size,\n    total_rows\nFROM system.tables\nWHERE database = currentDatabase()\nORDER BY total_bytes DESC\nLIMIT 20\nFORMAT Pretty\nSETTINGS output_format_pretty_color = 1;");
+    roundTrip("SELECT\n    database,\n    table,\n    formatReadableSize(total_bytes) AS size,\n    total_rows\nFROM system.tables\nWHERE database = currentDatabase()\nORDER BY total_bytes DESC\nLIMIT 20\nFORMAT Pretty\nSETTINGS output_format_pretty_color = 1;", 1);
   });
 
   test("Q121 Lightweight DELETE", () => {
